@@ -20,7 +20,7 @@ export class LoyaltyPopup extends Component {
 
   setup() {
     this.pos = usePos();
-    this.state = useState({ code: "", member: null, error: null });
+    this.state = useState({ code: "", member: null,redeemed: false, error: null });
     this.orm = useService("orm");
   }
 
@@ -36,8 +36,15 @@ export class LoyaltyPopup extends Component {
     this.state.member = member;
     this.state.error = null;
   }
+  async redeem(){
+      const res = await this.orm.call("pos.loyalty.card", "redeem_loyalty_card", [
+      this.state.member.id
+    ]);
+    this.state.redeemed = true;
+    this.state.member.points = res.new_balance;
+  }
   async confirm() {
-    this.props.getPayload(this.state.member);
+    this.props.getPayload({...this.state.member,redeem_discount: this.state.redeemed ? 50 : 0});
     this.props.close();
   }
 }
@@ -52,32 +59,32 @@ patch(ControlButtons.prototype, {
     order.loyalty_member = payload;
     order
       .get_orderlines()
-      .forEach((line) => line.set_discount(payload.discount));
+      .forEach((line) => line.set_discount(payload.discount + (payload.redeem_discount || 0)));
   },
 });
 
 patch(PaymentScreen.prototype, {
-  setup() {
-    super.setup();
-    this.orm = useService("orm");
-    this.notification = useService("notification");
-  },
-  async validateOrder(isForceValidate) {
-    const validatedOrder = await super.validateOrder(isForceValidate);
-    if (validatedOrder) {
-      const currentOrder = this.pos.get_order();
-      const loyaltyMember = currentOrder.loyalty_member;
-      if (loyaltyMember) {
-        const newBalance = await this.orm.call(
-          "pos.loyalty.card",
-          "add_points",
-          [loyaltyMember.id, currentOrder.get_total_with_tax()],
-        );
-        this.notification.add(
-          `Loyalty points updated! New balance: ${newBalance} points`,
-          { type: "success" },
-        );
-      }
-    }
-  },
+    setup() {
+        super.setup();
+        this.orm = useService("orm");
+        this.notification = useService("notification");
+    },
+    async validateOrder(isForceValidate) {
+        const currentOrder = this.pos.get_order();
+        const loyaltyMember = currentOrder?.loyalty_member;
+
+        await super.validateOrder(isForceValidate);
+
+        if (loyaltyMember) {
+            const newBalance = await this.orm.call(
+                "pos.loyalty.card",
+                "add_points",
+                [loyaltyMember.id, currentOrder.get_total_with_tax()]
+            );
+            this.notification.add(
+                `Loyalty points updated! New balance: ${newBalance} points`,
+                { type: "success" }
+            );
+        }
+    },
 });
